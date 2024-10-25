@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import pygame
 
 # Load the image
 frame = cv2.imread("smoothed_image.png")
@@ -9,92 +8,76 @@ frame2 = cv2.bitwise_not(framea)
 
 gray = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
 
-# Initialize Pygame
-pygame.init()
-
-# Set up display
-window_width, window_height = gray.shape[1], gray.shape[0]
-window = pygame.display.set_mode((window_width, window_height))
-pygame.display.set_caption("Threshold Adjuster")
-
-# Colors
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-BLACK = (0, 0, 0)
-
-# Button dimensions
-button_width, button_height = 50, 30
-
 # Initial threshold values
 threshold_min = 180
 threshold_max = 255
 
 # Minimum line length for filtering
-min_line_length = 50  # Set this to an appropriate value based on your gate size and distance
+min_line_length = 50  # Adjust based on your specific needs
 
-# Function to draw buttons
-def draw_buttons():
-    pygame.draw.rect(window, RED, (10, 10, button_width, button_height))  # Decrease min threshold
-    pygame.draw.rect(window, GREEN, (70, 10, button_width, button_height))  # Increase min threshold
-    pygame.draw.rect(window, RED, (150, 10, button_width, button_height))  # Decrease max threshold
-    pygame.draw.rect(window, GREEN, (210, 10, button_width, button_height))  # Increase max threshold
+def group_points(points, distance_threshold):
+    """ Group points that are within the distance_threshold of each other. """
+    if not points:
+        return []
 
-    # Button labels
-    font = pygame.font.SysFont(None, 24)
-    window.blit(font.render('-', True, BLACK), (30, 15))
-    window.blit(font.render('+', True, BLACK), (90, 15))
-    window.blit(font.render('-', True, BLACK), (170, 15))
-    window.blit(font.render('+', True, BLACK), (230, 15))
+    # Sort points based on x coordinates (helps with clustering)
+    points = sorted(points, key=lambda x: x[0])
+    clusters = []
+    cluster = [points[0]]
 
-# Function to apply threshold and convert image to Pygame surface
-def apply_threshold():
+    for point in points[1:]:
+        if np.linalg.norm(np.array(point) - np.array(cluster[-1])) < distance_threshold:
+            cluster.append(point)
+        else:
+            if len(cluster) > 1:
+                clusters.append(cluster)
+            cluster = [point]
+    if len(cluster) > 1:
+        clusters.append(cluster)
+
+    # Calculate the centroid of each cluster
+    centroids = []
+    for cluster in clusters:
+        x_coords = [p[0] for p in cluster]
+        y_coords = [p[1] for p in cluster]
+        centroid = (sum(x_coords) // len(cluster), sum(y_coords) // len(cluster))
+        centroids.append(centroid)
+    return centroids
+
+def apply_threshold(gray, threshold_min, threshold_max, min_line_length):
     _, threshold = cv2.threshold(gray, threshold_min, threshold_max, cv2.THRESH_BINARY)
     threshold_rgb = cv2.cvtColor(threshold, cv2.COLOR_GRAY2RGB)
 
     # Find and approximate contours
     contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    points = []
 
-    # Draw contours and area
+    # Draw contours and check for quadrilateral
     for cnt in contours:
         epsilon = 0.01 * cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, epsilon, True)
 
-        # Check line lengths within the approximated contour
+        # Collect points and draw lines if they meet the line length criterion
         for i in range(len(approx)):
-            pt1 = approx[i][0]
-            pt2 = approx[(i + 1) % len(approx)][0]
-            if np.linalg.norm(pt1 - pt2) >= min_line_length:
-                cv2.line(threshold_rgb, tuple(pt1), tuple(pt2), (0, 255, 0), 2)
+            pt1 = tuple(approx[i][0])
+            pt2 = tuple(approx[(i + 1) % len(approx)][0])
+            line_length = np.linalg.norm(np.array(pt1) - np.array(pt2))
+            if line_length >= min_line_length:
+                points.append(pt1)
+                points.append(pt2)
 
-    surface = pygame.surfarray.make_surface(threshold_rgb.transpose((1, 0, 2)))
-    return surface
+    # Group and average nearby points
+    centroids = group_points(points, 35)
+    for centroid in centroids:
+        cv2.circle(threshold_rgb, centroid, 5, (0, 255, 0), -1)
+        cv2.putText(threshold_rgb, str(centroid), centroid, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
 
-# Main loop
-running = True
-while running:
-    # Handle events
-    for event in pygame.event.get():
-        if event.type is pygame.QUIT:
-            running = False
-        elif event.type is pygame.MOUSEBUTTONDOWN:
-            mouse_x, mouse_y = event.pos
-            # Button logic for adjusting thresholds
-            if 10 <= mouse_x <= 60 and 10 <= mouse_y <= 40:
-                threshold_min = max(0, threshold_min - 5)
-            elif 70 <= mouse_x <= 120 and 10 <= mouse_y <= 40:
-                threshold_min = min(255, threshold_min + 5)
-            elif 150 <= mouse_x <= 200 and 10 <= mouse_y <= 40:
-                threshold_max = max(0, threshold_max - 5)
-            elif 210 <= mouse_x <= 260 and 10 <= mouse_y <= 40:
-                threshold_max = min(255, threshold_max + 5)
+    return threshold_rgb
 
-    # Update display
-    window.fill(WHITE)
-    draw_buttons()
-    threshold_surface = apply_threshold()
-    window.blit(threshold_surface, (0, 50))
-    pygame.display.flip()
+# Process the image
+processed_image = apply_threshold(gray, threshold_min, threshold_max, min_line_length)
 
-# Quit Pygame
-pygame.quit()
+# Display the processed image
+cv2.imshow("Processed Image", processed_image)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
