@@ -6,7 +6,7 @@ image = cv2.imread('enhanced_image.png')
 
 # Apply Gaussian Blur to smoothen the image
 # You can adjust the kernel size and sigma values to fine-tune the smoothing
-blurred_image = cv2.GaussianBlur(image, (11, 11), 0)
+blurred_image = cv2.GaussianBlur(image, (5, 5), 0)
 
 # Optionally, apply a median filter to reduce noise while keeping edges sharp
 median_filtered = cv2.medianBlur(blurred_image, 5)
